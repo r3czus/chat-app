@@ -222,33 +222,10 @@ public class ClientHandler implements Runnable {
                 // Zaktualizuj obiekt wiadomości z pełnym obiektem odbiorcy
                 message.setReceiver(receiver);
 
-                // Zapisz wiadomość w bazie danych
-                boolean saved = server.getDbManager().saveMessage(message);
-
-                if (saved) {
-                    System.out.println("Prywatna wiadomość zapisana w bazie danych");
-
-                    // Znajdź ClientHandler odbiorcy i wyślij mu wiadomość
-                    boolean delivered = false;
-                    for (ClientHandler client : server.getClients()) {
-                        if (client.getUser() != null && client.getUser().getUsername().equals(receiver.getUsername())) {
-                            client.sendMessage(message);
-                            System.out.println("Prywatna wiadomość dostarczona do " + receiver.getUsername());
-                            delivered = true;
-                            break;
-                        }
-                    }
-
-                    // Zawsze wyślij kopię wiadomości z powrotem do nadawcy
-                    sendMessage(message);
-                    System.out.println("Kopia prywatnej wiadomości wysłana do nadawcy: " + message.getSender().getUsername());
-                } else {
-                    System.out.println("Nie udało się zapisać prywatnej wiadomości w bazie danych");
-                }
+                // Wyślij wiadomość przez broadcastMessage
+                server.broadcastMessage(message);
             } else {
                 System.out.println("Nie znaleziono użytkownika: " + message.getReceiver().getUsername());
-                // Nawet jeśli nie znaleźliśmy odbiorcy, wyślij kopię wiadomości do nadawcy
-                sendMessage(message);
             }
         } catch (Exception e) {
             System.err.println("Błąd podczas obsługi prywatnej wiadomości: " + e.getMessage());
