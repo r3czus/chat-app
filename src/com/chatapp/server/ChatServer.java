@@ -1,4 +1,3 @@
-
 package com.chatapp.server;
 
 import com.chatapp.db.DatabaseManager;
@@ -22,11 +21,9 @@ public class ChatServer {
     private List<ClientHandler> clients;
     private DatabaseManager dbManager;
     private boolean running;
-
     public List<ClientHandler> getClients() {
         return new ArrayList<>(clients);
     }
-
     public ChatServer() {
         clients = new ArrayList<>();
         threadPool = Executors.newFixedThreadPool(MAX_CLIENTS);
@@ -50,7 +47,8 @@ public class ChatServer {
 
                     // Utworzenie obsługi dla klienta
                     ClientHandler clientHandler = new ClientHandler(clientSocket, this);
-                    clients.add(clientHandler);
+                    // Usunięto linię clients.add(clientHandler);
+                    // Klient dodaje się sam w konstruktorze ClientHandler
 
                     // Uruchomienie obsługi klienta w osobnym wątku
                     threadPool.execute(clientHandler);
@@ -100,23 +98,12 @@ public class ChatServer {
         // Zapisanie wiadomości w bazie danych
         dbManager.saveMessage(message);
 
-        // Jeśli wiadomość jest prywatna, wyślij tylko do konkretnego odbiorcy
-        if (message.isPrivate()) {
-            for (ClientHandler client : new ArrayList<>(clients)) {
-                // Wysyłaj tylko do nadawcy i odbiorcy
-                if (client.getUser() != null &&
-                        (client.getUser().getId() == message.getSender().getId() ||
-                                client.getUser().getId() == message.getReceiver().getId())) {
-                    client.sendMessage(message);
-                }
-            }
-        } else {
-            // Dla wiadomości publicznych - wysyłaj do wszystkich OPRÓCZ nadawcy
-            int senderId = message.getSender().getId();
-            for (ClientHandler client : new ArrayList<>(clients)) {
-                if (client.getUser() != null && client.getUser().getId() != senderId) {
-                    client.sendMessage(message);
-                }
+        // Wysłanie wiadomości do wszystkich klientów OPRÓCZ nadawcy
+        int senderId = message.getSender().getId();
+        for (ClientHandler client : new ArrayList<>(clients)) {
+            // Pomijamy wysyłanie wiadomości do nadawcy
+            if (client.getUser() != null && client.getUser().getId() != senderId) {
+                client.sendMessage(message);
             }
         }
 
@@ -124,6 +111,7 @@ public class ChatServer {
         sendUserListToAll();
     }
 
+    // Nowa metoda do pobierania listy nazw użytkowników dla konkretnego klienta
     public List<String> getUsernameList(ClientHandler excludeClient) {
         List<String> usernames = new ArrayList<>();
 
