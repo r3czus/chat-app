@@ -1,35 +1,35 @@
-package com.chatapp.model;
+package com.chatapp.common.model;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
 public class Message implements Serializable {
+
+
     private int id;
     private User sender;
-    private User receiver; // Dodane pole dla odbiorcy wiadomości prywatnej
+    private User receiver;
     private String content;
     private LocalDateTime timestamp;
 
-    // Konstruktor domyślny dla serializacji
     public Message() {
         this.timestamp = LocalDateTime.now();
     }
 
     public Message(User sender, String content) {
+        this();
         this.sender = sender;
         this.content = content;
-        this.timestamp = LocalDateTime.now();
     }
 
-    // Konstruktor dla wiadomości prywatnych
     public Message(User sender, User receiver, String content) {
+        this();
         this.sender = sender;
         this.receiver = receiver;
         this.content = content;
-        this.timestamp = LocalDateTime.now();
     }
 
-    // Gettery i Settery
+    // Gettery i settery
     public int getId() {
         return id;
     }
@@ -70,9 +70,12 @@ public class Message implements Serializable {
         this.timestamp = timestamp;
     }
 
-    // Metoda pomocnicza do sprawdzania, czy wiadomość jest prywatna
     public boolean isPrivate() {
         return receiver != null;
+    }
+
+    public boolean isSystemMessage() {
+        return sender == null;
     }
 
     @Override
@@ -80,7 +83,7 @@ public class Message implements Serializable {
         if (isPrivate()) {
             return "[" + timestamp.toLocalTime() + "] " + sender.getUsername() + " -> " + receiver.getUsername() + ": " + content;
         } else {
-            return "[" + timestamp.toLocalTime() + "] " + sender.getUsername() + ": " + content;
+            return "[" + timestamp.toLocalTime() + "] " + (sender != null ? sender.getUsername() : "System") + ": " + content;
         }
     }
 }

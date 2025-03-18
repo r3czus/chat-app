@@ -1,11 +1,15 @@
 package com.chatapp.client.ui;
 
-import com.chatapp.client.ChatClient;
-import com.chatapp.model.Message;
+import com.chatapp.client.network.ChatClient;
+import com.chatapp.common.config.Config;
+import com.chatapp.common.model.Message;
+import com.chatapp.util.Logger;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.time.format.DateTimeFormatter;
@@ -17,63 +21,40 @@ public class ChatFrame extends JFrame {
     private JTextField messageField;
     private JButton sendButton;
     private JButton logoutButton;
+    private JButton returnToPublicButton;
     private JLabel statusLabel;
     private JList<String> userList;
     private DefaultListModel<String> userListModel;
 
-    // Przechowujemy historyczne wiadomości
-    private List<Message> publicMessageHistory = new ArrayList<>();
+    // Przechowywanie historii wiadomości
+    private final List<Message> publicMessageHistory = new ArrayList<>();
+    private final DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss");
 
-    private ChatClient client;
-    private DateTimeFormatter timeFormatter;
+    private final ChatClient client;
     private String currentChatPartner = null;
     private boolean isLoggingOut = false;
 
     public ChatFrame(ChatClient client) {
         this.client = client;
-        this.timeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss");
 
         // Konfiguracja okna
-        setTitle("Chat App - " + client.getUser().getUsername());
-        setSize(700, 500);
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLocationRelativeTo(null);
+        setupWindow();
 
         // Utworzenie komponentów
         createComponents();
 
-        // Nasłuchiwanie nowych wiadomości
-        client.setOnMessageReceived(this::handleMessageReceived);
+        // Konfiguracja obsługi zdarzeń
+        setupEventHandlers();
 
-        // Nasłuchiwanie zmian statusu połączenia
-        client.setOnConnectionStatusChanged(connected -> {
-            SwingUtilities.invokeLater(() -> {
-                if (connected) {
-                    statusLabel.setText("Połączono");
-                    messageField.setEnabled(true);
-                    sendButton.setEnabled(true);
-                    logoutButton.setEnabled(true);
-                } else {
-                    statusLabel.setText("Rozłączono");
-                    messageField.setEnabled(false);
-                    sendButton.setEnabled(false);
-                    logoutButton.setEnabled(false);
+        // Natychmiastowe pobranie listy użytkowników
+        refreshUserList();
+    }
 
-                    if (!isLoggingOut) {
-                        JOptionPane.showMessageDialog(
-                                this,
-                                "Utracono połączenie z serwerem.",
-                                "Rozłączono",
-                                JOptionPane.ERROR_MESSAGE
-                        );
-
-                        dispose();
-                        LoginFrame loginFrame = new LoginFrame();
-                        loginFrame.setVisible(true);
-                    }
-                }
-            });
-        });
+    private void setupWindow() {
+        setTitle("Chat App - " + client.getUser().getUsername());
+        setSize(700, 500);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
 
         // Obsługa zamykania okna
         addWindowListener(new WindowAdapter() {
@@ -81,15 +62,6 @@ public class ChatFrame extends JFrame {
             public void windowClosing(WindowEvent e) {
                 client.disconnect();
             }
-        });
-
-        // Nasłuchiwanie aktualizacji listy użytkowników
-        client.setOnUserListUpdated(this::updateUserList);
-
-        // Wymuś natychmiastowe pobranie listy użytkowników zaraz po otwarciu okna
-        SwingUtilities.invokeLater(() -> {
-            statusLabel.setText("Pobieranie listy użytkowników...");
-            client.refreshUserList();
         });
     }
 
@@ -101,15 +73,14 @@ public class ChatFrame extends JFrame {
         // Panel statusu z przyciskiem wylogowania
         JPanel statusPanel = new JPanel(new BorderLayout());
         JPanel statusLeftPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        statusLabel = new JLabel("Łączenie...");
+        statusLabel = new JLabel("Połączono");
         statusLeftPanel.add(statusLabel);
 
         JPanel statusRightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         logoutButton = new JButton("Wyloguj");
+        returnToPublicButton = new JButton("Powrót do czatu ogólnego");
+        statusRightPanel.add(returnToPublicButton);
         statusRightPanel.add(logoutButton);
-
-        JButton returnToPublicButton = new JButton("Powrót do czatu ogólnego");
-        statusRightPanel.add(returnToPublicButton, 0);
 
         statusPanel.add(statusLeftPanel, BorderLayout.WEST);
         statusPanel.add(statusRightPanel, BorderLayout.EAST);
@@ -152,10 +123,6 @@ public class ChatFrame extends JFrame {
 
         // Dodaj przycisk odświeżania listy użytkowników
         JButton refreshButton = new JButton("Odśwież listę");
-        refreshButton.addActionListener(e -> {
-            statusLabel.setText("Aktualizowanie listy użytkowników...");
-            client.refreshUserList();
-        });
         usersPanel.add(refreshButton, BorderLayout.SOUTH);
 
         // Konfiguracja Split Pane
@@ -169,19 +136,26 @@ public class ChatFrame extends JFrame {
         // Dodanie panelu głównego do okna
         setContentPane(mainPanel);
 
-        // Dodanie akcji do przycisku wysyłania
+        // Konfiguracja przycisków
+        refreshButton.addActionListener(e -> refreshUserList());
+        returnToPublicButton.addActionListener(e -> returnToPublicChat());
+    }
+
+    private void setupEventHandlers() {
+        // Obsługa przycisku wysyłania
         sendButton.addActionListener(this::handleSendMessage);
 
-        // Dodanie akcji do pola wiadomości (wysyłanie po naciśnięciu Enter)
+        // Obsługa klawisza Enter w polu wiadomości
         messageField.addActionListener(this::handleSendMessage);
 
-        // Dodanie akcji do przycisku wylogowania
+        // Obsługa przycisku wylogowania
         logoutButton.addActionListener(this::handleLogout);
 
-        // Dodanie akcji do listy użytkowników (podwójne kliknięcie)
-        userList.addMouseListener(new java.awt.event.MouseAdapter() {
-            public void mouseClicked(java.awt.event.MouseEvent evt) {
-                if (evt.getClickCount() == 2) {
+        // Obsługa dwukliku na liście użytkowników
+        userList.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (e.getClickCount() == 2) {
                     String selectedUser = userList.getSelectedValue();
                     if (selectedUser != null) {
                         handleUserSelection(selectedUser);
@@ -190,41 +164,32 @@ public class ChatFrame extends JFrame {
             }
         });
 
-        // Obsługa przycisku powrotu do czatu ogólnego
-        returnToPublicButton.addActionListener(e -> {
-            currentChatPartner = null;
-            setTitle("Chat App - " + client.getUser().getUsername());
-            chatArea.setText("");
-            chatArea.append("Powrócono do czatu ogólnego\n\n");
+        // Nasłuchiwanie nowych wiadomości
+        client.setOnMessageReceived(this::handleMessageReceived);
 
-            // Wyświetl wszystkie zapisane publiczne wiadomości
-            displayPublicMessageHistory();
+        // Nasłuchiwanie zmian statusu połączenia
+        client.setOnConnectionStatusChanged(this::handleConnectionStatusChanged);
+
+        // Nasłuchiwanie aktualizacji listy użytkowników
+        client.setOnUserListUpdated(this::updateUserList);
+    }
+
+    private void refreshUserList() {
+        SwingUtilities.invokeLater(() -> {
+            statusLabel.setText("Aktualizowanie listy użytkowników...");
+            client.refreshUserList();
         });
     }
 
-    // Wyświetla zapisaną historię wiadomości publicznych
-    private void displayPublicMessageHistory() {
-        if (publicMessageHistory.isEmpty()) {
-            chatArea.append("Nie znaleziono historii wiadomości dla czatu głównego.\n");
-            return;
-        }
+    private void returnToPublicChat() {
+        currentChatPartner = null;
+        setTitle("Chat App - " + client.getUser().getUsername());
 
-        chatArea.append("--- Historia wiadomości ---\n");
+        chatArea.setText("");
+        chatArea.append("Powrócono do czatu ogólnego\n\n");
 
-        for (Message message : publicMessageHistory) {
-            if (message.getSender() != null) {
-                String time = message.getTimestamp().format(timeFormatter);
-                String sender = message.getSender().getUsername();
-                String content = message.getContent();
-
-                chatArea.append(String.format("[%s] %s: %s\n", time, sender, content));
-            }
-        }
-
-        chatArea.append("--- Koniec historii ---\n\n");
-
-        // Przewiń na dół
-        chatArea.setCaretPosition(chatArea.getDocument().getLength());
+        // Wyświetl wszystkie zapisane publiczne wiadomości
+        displayPublicMessageHistory();
     }
 
     private void handleSendMessage(ActionEvent e) {
@@ -232,6 +197,7 @@ public class ChatFrame extends JFrame {
 
         if (!content.isEmpty()) {
             boolean sent;
+
             if (currentChatPartner == null) {
                 sent = client.sendMessage(content);
             } else {
@@ -255,8 +221,7 @@ public class ChatFrame extends JFrame {
         isLoggingOut = true;
         client.logout();
         dispose();
-        LoginFrame loginFrame = new LoginFrame();
-        loginFrame.setVisible(true);
+        new LoginFrame().setVisible(true);
     }
 
     private void handleUserSelection(String username) {
@@ -273,26 +238,55 @@ public class ChatFrame extends JFrame {
         client.requestPrivateMessageHistory(username);
     }
 
-    public void updateUserList(java.util.List<String> users) {
+    private void handleConnectionStatusChanged(boolean connected) {
         SwingUtilities.invokeLater(() -> {
-            statusLabel.setText("Połączono");
-            userListModel.clear();
-            if (users != null && !users.isEmpty()) {
-                for (String user : users) {
-                    userListModel.addElement(user);
-                }
-                System.out.println("Zaktualizowano listę użytkowników: " + users.size() + " użytkowników");
+            if (connected) {
+                statusLabel.setText("Połączono");
+                messageField.setEnabled(true);
+                sendButton.setEnabled(true);
+                logoutButton.setEnabled(true);
             } else {
-                System.out.println("Otrzymano pustą listę użytkowników!");
+                statusLabel.setText("Rozłączono");
+                messageField.setEnabled(false);
+                sendButton.setEnabled(false);
+                logoutButton.setEnabled(false);
+
+                if (!isLoggingOut) {
+                    showConnectionLostDialog();
+                }
             }
         });
     }
 
-    // Nowa metoda obsługi wiadomości - rozdziela obsługę i wyświetlanie
+    private void showConnectionLostDialog() {
+        JOptionPane.showMessageDialog(
+                this,
+                "Utracono połączenie z serwerem.",
+                "Rozłączono",
+                JOptionPane.ERROR_MESSAGE
+        );
+
+        dispose();
+        new LoginFrame().setVisible(true);
+    }
+
+    private void updateUserList(List<String> users) {
+        SwingUtilities.invokeLater(() -> {
+            statusLabel.setText("Połączono");
+            userListModel.clear();
+
+            if (users != null && !users.isEmpty()) {
+                users.forEach(userListModel::addElement);
+                Logger.debug("Zaktualizowano listę użytkowników: " + users.size() + " użytkowników");
+            } else {
+                Logger.warn("Otrzymano pustą listę użytkowników!");
+            }
+        });
+    }
+
     private void handleMessageReceived(Message message) {
         // Sprawdź czy to wiadomość publiczna i zapisz ją w historii
         if (message.getSender() != null && !message.isPrivate()) {
-            // Dodaj do historii publicznych wiadomości
             publicMessageHistory.add(message);
         }
 
@@ -300,46 +294,75 @@ public class ChatFrame extends JFrame {
         displayMessage(message);
     }
 
-    private void displayMessage(Message message) {
-        SwingUtilities.invokeLater(() -> {
-            // Obsługa wiadomości systemowych
-            if (message.getSender() == null) {
-                // Ignorujemy wiadomości końca historii
-                if (!message.getContent().contains("KONIEC HISTORII")) {
-                    chatArea.append(message.getContent() + "\n");
-                }
-                return;
-            }
+    private void displayPublicMessageHistory() {
+        if (publicMessageHistory.isEmpty()) {
+            chatArea.append("Nie znaleziono historii wiadomości dla czatu głównego.\n");
+            return;
+        }
 
-            // Sprawdź, czy wiadomość ma być wyświetlona w bieżącym widoku czatu
-            boolean isPrivateMessage = message.isPrivate();
-            String senderUsername = message.getSender().getUsername();
-            String receiverUsername = isPrivateMessage && message.getReceiver() != null ?
-                    message.getReceiver().getUsername() : null;
+        chatArea.append("--- Historia wiadomości ---\n");
 
-            boolean showInCurrentChat = false;
-
-            if (currentChatPartner == null) {
-                // Jesteśmy w czacie grupowym - pokazuj tylko wiadomości publiczne
-                showInCurrentChat = !isPrivateMessage;
-            } else {
-                // Jesteśmy w czacie prywatnym - pokazuj tylko wiadomości z/do bieżącego partnera
-                showInCurrentChat = isPrivateMessage &&
-                        (senderUsername.equals(currentChatPartner) ||
-                                (receiverUsername != null && receiverUsername.equals(currentChatPartner)));
-            }
-
-            if (showInCurrentChat) {
-                // Formatowanie i wyświetlanie wiadomości
+        for (Message message : publicMessageHistory) {
+            if (message.getSender() != null) {
                 String time = message.getTimestamp().format(timeFormatter);
                 String sender = message.getSender().getUsername();
                 String content = message.getContent();
 
                 chatArea.append(String.format("[%s] %s: %s\n", time, sender, content));
+            }
+        }
 
-                // Przewijanie do nowej wiadomości
-                chatArea.setCaretPosition(chatArea.getDocument().getLength());
+        chatArea.append("--- Koniec historii ---\n\n");
+
+        // Przewiń na dół
+        scrollToBottom();
+    }
+
+    private void displayMessage(Message message) {
+        SwingUtilities.invokeLater(() -> {
+            // Obsługa wiadomości systemowych
+            if (message.isSystemMessage()) {
+                // Ignorujemy wiadomości końca historii
+
+                return;
+            }
+
+            // Sprawdź, czy wiadomość ma być wyświetlona w bieżącym widoku czatu
+            if (shouldDisplayMessageInCurrentView(message)) {
+                formatAndDisplayMessage(message);
             }
         });
+    }
+
+    private boolean shouldDisplayMessageInCurrentView(Message message) {
+        boolean isPrivateMessage = message.isPrivate();
+        String senderUsername = message.getSender().getUsername();
+        String receiverUsername = isPrivateMessage && message.getReceiver() != null ?
+                message.getReceiver().getUsername() : null;
+
+        if (currentChatPartner == null) {
+            // Jesteśmy w czacie grupowym - pokazuj tylko wiadomości publiczne
+            return !isPrivateMessage;
+        } else {
+            // Jesteśmy w czacie prywatnym - pokazuj tylko wiadomości z/do bieżącego partnera
+            return isPrivateMessage &&
+                    (senderUsername.equals(currentChatPartner) ||
+                            (receiverUsername != null && receiverUsername.equals(currentChatPartner)));
+        }
+    }
+
+    private void formatAndDisplayMessage(Message message) {
+        String time = message.getTimestamp().format(timeFormatter);
+        String sender = message.getSender().getUsername();
+        String content = message.getContent();
+
+        chatArea.append(String.format("[%s] %s: %s\n", time, sender, content));
+
+        // Przewijanie do nowej wiadomości
+        scrollToBottom();
+    }
+
+    private void scrollToBottom() {
+        chatArea.setCaretPosition(chatArea.getDocument().getLength());
     }
 }

@@ -1,7 +1,7 @@
 package com.chatapp.client.ui;
 
-import com.chatapp.client.ChatClient;
-import com.chatapp.model.User;
+import com.chatapp.client.network.ChatClient;
+import com.chatapp.util.Logger;
 
 import javax.swing.*;
 import java.awt.*;
@@ -21,13 +21,21 @@ public class RegisterFrame extends JFrame {
         this.client = client;
 
         // Konfiguracja okna
+        setupWindow();
+
+        // Utworzenie komponentów
+        createComponents();
+
+        // Konfiguracja obsługi zdarzeń
+        setupEventHandlers();
+    }
+
+    private void setupWindow() {
         setTitle("Chat App - Rejestracja");
         setSize(350, 250);
         setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         setLocationRelativeTo(null);
-
-        // Utworzenie komponentów
-        createComponents();
+        setResizable(false);
     }
 
     private void createComponents() {
@@ -37,7 +45,6 @@ public class RegisterFrame extends JFrame {
 
         // Panel formularza
         JPanel formPanel = new JPanel(new GridLayout(3, 2, 5, 5));
-
         formPanel.add(new JLabel("Nazwa użytkownika:"));
         usernameField = new JTextField();
         formPanel.add(usernameField);
@@ -69,9 +76,11 @@ public class RegisterFrame extends JFrame {
 
         // Dodanie panelu głównego do okna
         setContentPane(mainPanel);
+    }
 
-        // Dodanie akcji do przycisków
+    private void setupEventHandlers() {
         registerButton.addActionListener(this::handleRegister);
+
         backButton.addActionListener(e -> {
             dispose();
             new LoginFrame().setVisible(true);
@@ -79,25 +88,12 @@ public class RegisterFrame extends JFrame {
     }
 
     private void handleRegister(ActionEvent e) {
+        if (!validateInput()) {
+            return;
+        }
+
         String username = usernameField.getText().trim();
         String password = new String(passwordField.getPassword());
-        String confirmPassword = new String(confirmPasswordField.getPassword());
-
-        // Walidacja danych
-        if (username.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Podaj nazwę użytkownika", "Błąd", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
-        if (password.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Podaj hasło", "Błąd", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
-        if (!password.equals(confirmPassword)) {
-            JOptionPane.showMessageDialog(this, "Hasła nie są zgodne", "Błąd", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
 
         // Wyłączenie przycisku podczas rejestracji
         registerButton.setEnabled(false);
@@ -106,20 +102,8 @@ public class RegisterFrame extends JFrame {
         // Rejestracja w osobnym wątku
         new Thread(() -> {
             // Połączenie z serwerem jeśli nie połączono
-            if (!client.isConnected()) {
-                if (!client.connect()) {
-                    SwingUtilities.invokeLater(() -> {
-                        statusLabel.setText("Nie można połączyć z serwerem");
-                        registerButton.setEnabled(true);
-                        JOptionPane.showMessageDialog(
-                                this,
-                                "Nie można połączyć się z serwerem. Sprawdź czy serwer jest uruchomiony.",
-                                "Błąd połączenia",
-                                JOptionPane.ERROR_MESSAGE
-                        );
-                    });
-                    return;
-                }
+            if (!ensureConnected()) {
+                return;
             }
 
             // Rejestracja użytkownika
@@ -127,25 +111,75 @@ public class RegisterFrame extends JFrame {
 
             SwingUtilities.invokeLater(() -> {
                 if (success) {
-                    JOptionPane.showMessageDialog(
-                            this,
-                            "Rejestracja zakończona pomyślnie. Możesz się teraz zalogować.",
-                            "Rejestracja udana",
-                            JOptionPane.INFORMATION_MESSAGE
-                    );
-                    dispose();
-                    new LoginFrame().setVisible(true);
+                    showRegistrationSuccess();
                 } else {
-                    statusLabel.setText("Błąd rejestracji");
-                    registerButton.setEnabled(true);
-                    JOptionPane.showMessageDialog(
-                            this,
-                            "Nie można zarejestrować użytkownika. Nazwa użytkownika może być już zajęta.",
-                            "Błąd rejestracji",
-                            JOptionPane.ERROR_MESSAGE
-                    );
+                    showRegistrationFailure();
                 }
             });
         }).start();
+    }
+
+    private boolean validateInput() {
+        String username = usernameField.getText().trim();
+        String password = new String(passwordField.getPassword());
+        String confirmPassword = new String(confirmPasswordField.getPassword());
+
+        if (username.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Podaj nazwę użytkownika", "Błąd", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        if (password.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "Podaj hasło", "Błąd", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        if (!password.equals(confirmPassword)) {
+            JOptionPane.showMessageDialog(this, "Hasła nie są zgodne", "Błąd", JOptionPane.ERROR_MESSAGE);
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean ensureConnected() {
+        if (!client.isConnected()) {
+            if (!client.connect()) {
+                SwingUtilities.invokeLater(() -> {
+                    statusLabel.setText("Nie można połączyć z serwerem");
+                    registerButton.setEnabled(true);
+                    JOptionPane.showMessageDialog(
+                            this,
+                            "Nie można połączyć się z serwerem. Sprawdź czy serwer jest uruchomiony.",
+                            "Błąd połączenia",
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                });
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private void showRegistrationSuccess() {
+        JOptionPane.showMessageDialog(
+                this,
+                "Rejestracja zakończona pomyślnie. Możesz się teraz zalogować.",
+                "Rejestracja udana",
+                JOptionPane.INFORMATION_MESSAGE
+        );
+        dispose();
+        new LoginFrame().setVisible(true);
+    }
+
+    private void showRegistrationFailure() {
+        statusLabel.setText("Błąd rejestracji");
+        registerButton.setEnabled(true);
+        JOptionPane.showMessageDialog(
+                this,
+                "Nie można zarejestrować użytkownika. Nazwa użytkownika może być już zajęta.",
+                "Błąd rejestracji",
+                JOptionPane.ERROR_MESSAGE
+        );
     }
 }

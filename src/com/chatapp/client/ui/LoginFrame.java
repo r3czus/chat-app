@@ -1,15 +1,18 @@
 package com.chatapp.client.ui;
 
-import com.chatapp.client.ChatClient;
+import com.chatapp.client.network.ChatClient;
+import com.chatapp.util.Logger;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
 
 public class LoginFrame extends JFrame {
     private JTextField usernameField;
     private JPasswordField passwordField;
     private JButton loginButton;
+    private JButton registerButton;
     private JLabel statusLabel;
 
     private ChatClient client;
@@ -19,50 +22,24 @@ public class LoginFrame extends JFrame {
         client = new ChatClient();
 
         // Konfiguracja okna
-        setTitle("Chat App - Logowanie");
-        setSize(300, 220); // Zwiększamy wysokość aby zmieścić przycisk rejestracji
-        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setLocationRelativeTo(null);
+        setupWindow();
 
         // Utworzenie komponentów
         createComponents();
 
-        // Nasłuchiwanie statusu połączenia
-        client.setOnConnectionStatusChanged(connected -> {
-            SwingUtilities.invokeLater(() -> {
-                if (connected) {
-                    statusLabel.setText("Połączono z serwerem");
-                    loginButton.setEnabled(true);
-                } else {
-                    statusLabel.setText("Rozłączono z serwerem");
-                    loginButton.setEnabled(false);
-                }
-            });
-        });
+        // Konfiguracja obsługi zdarzeń
+        setupEventHandlers();
 
         // Próba połączenia z serwerem
-        new Thread(() -> {
-            statusLabel.setText("Łączenie z serwerem...");
-            loginButton.setEnabled(false);
+        connectToServer();
+    }
 
-            if (client.connect()) {
-                SwingUtilities.invokeLater(() -> {
-                    statusLabel.setText("Połączono z serwerem");
-                    loginButton.setEnabled(true);
-                });
-            } else {
-                SwingUtilities.invokeLater(() -> {
-                    statusLabel.setText("Nie można połączyć się z serwerem");
-                    loginButton.setEnabled(false);
-                    JOptionPane.showMessageDialog(
-                            this,
-                            "Nie można połączyć się z serwerem. Sprawdź czy serwer jest uruchomiony.",
-                            "Błąd połączenia",
-                            JOptionPane.ERROR_MESSAGE
-                    );
-                });
-            }
-        }).start();
+    private void setupWindow() {
+        setTitle("Chat App - Logowanie");
+        setSize(300, 220);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+        setResizable(false);
     }
 
     private void createComponents() {
@@ -72,7 +49,6 @@ public class LoginFrame extends JFrame {
 
         // Panel formularza
         JPanel formPanel = new JPanel(new GridLayout(2, 2, 5, 5));
-
         formPanel.add(new JLabel("Nazwa użytkownika:"));
         usernameField = new JTextField();
         formPanel.add(usernameField);
@@ -84,8 +60,7 @@ public class LoginFrame extends JFrame {
         // Panel przycisków
         JPanel buttonPanel = new JPanel(new GridLayout(2, 1, 0, 5));
         loginButton = new JButton("Zaloguj");
-        JButton registerButton = new JButton("Rejestracja"); // Nowy przycisk
-
+        registerButton = new JButton("Rejestracja");
         buttonPanel.add(loginButton);
         buttonPanel.add(registerButton);
 
@@ -101,18 +76,59 @@ public class LoginFrame extends JFrame {
 
         // Dodanie panelu głównego do okna
         setContentPane(mainPanel);
+    }
 
-        // Dodanie akcji do przycisków
+    private void setupEventHandlers() {
+        // Obsługa przycisku logowania
         loginButton.addActionListener(this::handleLogin);
 
+        // Obsługa przycisku rejestracji
         registerButton.addActionListener(e -> {
             setVisible(false);
             new RegisterFrame(client).setVisible(true);
             dispose();
         });
 
-        // Dodanie akcji do pola hasła (logowanie po naciśnięciu Enter)
+        // Logowanie po naciśnięciu Enter w polu hasła
         passwordField.addActionListener(this::handleLogin);
+
+        // Nasłuchiwanie statusu połączenia
+        client.setOnConnectionStatusChanged(this::updateConnectionStatus);
+    }
+
+    private void updateConnectionStatus(boolean connected) {
+        SwingUtilities.invokeLater(() -> {
+            if (connected) {
+                statusLabel.setText("Połączono z serwerem");
+                loginButton.setEnabled(true);
+            } else {
+                statusLabel.setText("Rozłączono z serwerem");
+                loginButton.setEnabled(false);
+            }
+        });
+    }
+
+    private void connectToServer() {
+        new Thread(() -> {
+            statusLabel.setText("Łączenie z serwerem...");
+            loginButton.setEnabled(false);
+
+            if (!client.connect()) {
+                SwingUtilities.invokeLater(() -> {
+                    statusLabel.setText("Nie można połączyć się z serwerem");
+                    showConnectionError();
+                });
+            }
+        }).start();
+    }
+
+    private void showConnectionError() {
+        JOptionPane.showMessageDialog(
+                this,
+                "Nie można połączyć się z serwerem. Sprawdź czy serwer jest uruchomiony.",
+                "Błąd połączenia",
+                JOptionPane.ERROR_MESSAGE
+        );
     }
 
     private void handleLogin(ActionEvent e) {
@@ -137,12 +153,7 @@ public class LoginFrame extends JFrame {
                     SwingUtilities.invokeLater(() -> {
                         statusLabel.setText("Nie można połączyć się z serwerem");
                         loginButton.setEnabled(true);
-                        JOptionPane.showMessageDialog(
-                                this,
-                                "Nie można połączyć się z serwerem. Sprawdź czy serwer jest uruchomiony.",
-                                "Błąd połączenia",
-                                JOptionPane.ERROR_MESSAGE
-                        );
+                        showConnectionError();
                     });
                     return;
                 }
@@ -153,15 +164,7 @@ public class LoginFrame extends JFrame {
 
             SwingUtilities.invokeLater(() -> {
                 if (success) {
-                    // Ukrycie okna logowania
-                    setVisible(false);
-
-                    // Otwarcie okna czatu
-                    ChatFrame chatFrame = new ChatFrame(client);
-                    chatFrame.setVisible(true);
-
-                    // Zamknięcie okna logowania
-                    dispose();
+                    openChatWindow();
                 } else {
                     statusLabel.setText("Błąd autoryzacji");
                     loginButton.setEnabled(true);
@@ -176,17 +179,33 @@ public class LoginFrame extends JFrame {
         }).start();
     }
 
-    // Metoda main do uruchomienia aplikacji
-    public static void main(String[] args) {
-        // Uruchomienie interfejsu w wątku EDT (Event Dispatch Thread)
-        SwingUtilities.invokeLater(() -> {
-            try {
-                // Ustawienie wyglądu systemu operacyjnego
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
+    private void openChatWindow() {
+        // Ukrycie okna logowania
+        setVisible(false);
 
+        // Otwarcie okna czatu
+        ChatFrame chatFrame = new ChatFrame(client);
+        chatFrame.setVisible(true);
+
+        // Zamknięcie okna logowania
+        dispose();
+    }
+
+    // Metoda pomocnicza do ustawiania wyglądu
+    public static void setSystemLookAndFeel() {
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (Exception e) {
+            Logger.error("Błąd podczas ustawiania wyglądu: " + e.getMessage());
+        }
+    }
+    public static void main(String[] args) {
+        // Ustawienie poziomu logowania
+        Logger.setMinLevel(Logger.LogLevel.INFO);
+
+        // Uruchomienie interfejsu w wątku EDT
+        SwingUtilities.invokeLater(() -> {
+            setSystemLookAndFeel();
             LoginFrame loginFrame = new LoginFrame();
             loginFrame.setVisible(true);
         });

@@ -1,27 +1,38 @@
 package com.chatapp;
 
 import com.chatapp.client.ui.LoginFrame;
-import com.chatapp.server.ChatServer;
+import com.chatapp.server.network.ChatServer;
+import com.chatapp.util.Logger;
+import com.chatapp.util.Logger.LogLevel;
 
 import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintStream;
 
 public class Main {
+
     public static void main(String[] args) {
+        // Ustawienie poziomu logowania
+        Logger.setMinLevel(LogLevel.INFO);
+
+        // Ustawienie wyglądu aplikacji
+        setupLookAndFeel();
+
         // Sprawdź argumenty wiersza poleceń
         if (args.length > 0) {
             String mode = args[0].toLowerCase();
             switch (mode) {
                 case "server":
-                    SwingUtilities.invokeLater(() -> startServer());
+                    SwingUtilities.invokeLater(Main::startServer);
                     break;
                 case "client":
-                    SwingUtilities.invokeLater(() -> startClient());
+                    SwingUtilities.invokeLater(Main::startClient);
                     break;
                 default:
-                    System.out.println("Nieznany tryb. Użyj: server lub client");
+                    Logger.warn("Nieznany tryb: " + mode);
                     showModeSelectionDialog();
                     break;
             }
@@ -30,16 +41,18 @@ public class Main {
             showModeSelectionDialog();
         }
     }
+
+    private static void setupLookAndFeel() {
+        try {
+            UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+        } catch (Exception e) {
+            Logger.error("Błąd podczas ustawiania wyglądu: " + e.getMessage());
+        }
+    }
+
     private static void showModeSelectionDialog() {
         // Uruchomienie interfejsu w wątku EDT (Event Dispatch Thread)
         SwingUtilities.invokeLater(() -> {
-            try {
-                // Ustawienie wyglądu systemu operacyjnego
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-
             // Utworzenie okna wyboru trybu
             JFrame startFrame = new JFrame("Chat App - Start");
             startFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -78,7 +91,7 @@ public class Main {
         // Utworzenie okna serwera
         JFrame serverFrame = new JFrame("Chat App - Serwer");
         serverFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        serverFrame.setSize(400, 300);
+        serverFrame.setSize(600, 400);
         serverFrame.setLocationRelativeTo(null);
 
         JPanel panel = new JPanel(new BorderLayout(10, 10));
@@ -86,39 +99,24 @@ public class Main {
 
         JTextArea logArea = new JTextArea();
         logArea.setEditable(false);
+        logArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         JScrollPane scrollPane = new JScrollPane(logArea);
 
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         JButton stopButton = new JButton("Zatrzymaj Serwer");
+        JButton viewDataButton = new JButton("Pokaż dane");
+        buttonPanel.add(viewDataButton);
+        buttonPanel.add(stopButton);
 
         panel.add(new JLabel("Logi serwera:"), BorderLayout.NORTH);
         panel.add(scrollPane, BorderLayout.CENTER);
-        panel.add(stopButton, BorderLayout.SOUTH);
+        panel.add(buttonPanel, BorderLayout.SOUTH);
 
         serverFrame.getContentPane().add(panel);
         serverFrame.setVisible(true);
 
-
         // Przekierowanie wyjścia standardowego do obszaru tekstowego
-        System.setOut(new java.io.PrintStream(new java.io.OutputStream() {
-            @Override
-            public void write(int b) throws IOException {
-                SwingUtilities.invokeLater(() -> {
-                    logArea.append(String.valueOf((char) b));
-                    logArea.setCaretPosition(logArea.getDocument().getLength());
-                });
-            }
-        }));
-
-        // Przekierowanie wyjścia błędów do obszaru tekstowego
-        System.setErr(new java.io.PrintStream(new java.io.OutputStream() {
-            @Override
-            public void write(int b) throws IOException {
-                SwingUtilities.invokeLater(() -> {
-                    logArea.append(String.valueOf((char) b));
-                    logArea.setCaretPosition(logArea.getDocument().getLength());
-                });
-            }
-        }));
+        redirectSystemOutput(logArea);
 
         // Uruchomienie serwera w osobnym wątku
         ChatServer server = new ChatServer();
@@ -126,28 +124,63 @@ public class Main {
         serverThread.setDaemon(true);
         serverThread.start();
 
-        // Obsługa przycisku zatrzymania
+        // Obsługa przycisków
         stopButton.addActionListener((ActionEvent e) -> {
-            server.stop();
+            server.close();
             serverFrame.dispose();
             System.exit(0);
         });
-            JButton viewDataButton = new JButton("Pokaż dane");
-            JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-            buttonPanel.add(stopButton);
-            buttonPanel.add(viewDataButton);
-            panel.add(buttonPanel, BorderLayout.SOUTH);  // Zamiast panel.add(stopButton, BorderLayout.SOUTH);
 
-    // Obsługa przycisku
-            viewDataButton.addActionListener((ActionEvent e) -> {
-                server.getDbManager().showDatabaseContentUI();
-            });
+        viewDataButton.addActionListener((ActionEvent e) -> {
+            server.getDbManager().showDatabaseContentUI();
+        });
     }
-
 
     private static void startClient() {
         // Uruchomienie okna logowania klienta
-        LoginFrame loginFrame = new LoginFrame();
-        loginFrame.setVisible(true);
+        SwingUtilities.invokeLater(() -> {
+            LoginFrame loginFrame = new LoginFrame();
+            loginFrame.setVisible(true);
+        });
+    }
+
+    private static void redirectSystemOutput(JTextArea textArea) {
+        // Przekierowanie wyjścia standardowego
+        System.setOut(new PrintStream(new TextAreaOutputStream(textArea, false)));
+
+        // Przekierowanie wyjścia błędów
+        System.setErr(new PrintStream(new TextAreaOutputStream(textArea, true)));
+    }
+
+    private static class TextAreaOutputStream extends OutputStream {
+        private final JTextArea textArea;
+        private final StringBuilder buffer = new StringBuilder();
+        private final boolean isError;
+
+        public TextAreaOutputStream(JTextArea textArea, boolean isError) {
+            this.textArea = textArea;
+            this.isError = isError;
+        }
+
+        @Override
+        public void write(int b) throws IOException {
+            char c = (char) b;
+
+            if (c == '\n') {
+                final String text = buffer.toString();
+                buffer.setLength(0);
+
+                SwingUtilities.invokeLater(() -> {
+                    if (isError) {
+                        textArea.append("[ERROR] " + text + "\n");
+                    } else {
+                        textArea.append(text + "\n");
+                    }
+                    textArea.setCaretPosition(textArea.getDocument().getLength());
+                });
+            } else {
+                buffer.append(c);
+            }
+        }
     }
 }
